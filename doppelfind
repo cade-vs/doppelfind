@@ -13,6 +13,11 @@ use strict;
 use Data::Tools;
 use POSIX;
 
+# TODO:
+# set min size
+# check only sizes
+# check only partial hashes
+
 $|++;
 
 my %SZ; # size only
@@ -32,12 +37,13 @@ my $z;
 for my $e ( @$files )
   {
   my $sz = -s $e;
-  next unless $sz > 1; # FIXME: TODO: OPTION minsize
+  next unless $sz > 1_000_000_000; # FIXME: TODO: OPTION minsize
   my $rep = !( $z++ % 100 ) ? int( $z / 100 ) % 2 ? '*  ' : '  *' : undef;
   print STDERR "  $rep           \r" if $rep;
   push @{ $SZ{ $sz } }, $e;
   }
 $az = $z;
+
 
 print STDERR "scanning partial hashes...\n";
 $az = filter_hash_groups( $az, \%SZ,  \%PH, sub { return sha1_hex( load_file_part( shift ) ) } );
