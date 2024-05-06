@@ -6,7 +6,7 @@
 #  http://cade.noxrun.com
 #  <cade@noxrun.com> <cade@cpan.org> <shabanski@gmail.com> 
 #
-#  GPL
+#  LICENSE: GPLv2
 #
 ##############################################################################
 use strict;
@@ -52,6 +52,7 @@ notes:
     * options cannot be grouped: -Ps is invalid, correct is: -P -s 1G
     * files are compared by SIZE+SHA1, not full content compare
     * if Time::Progress is available, ETA and elapsed time stats are printed
+    * distributed under GPLv2 license
 END
 
 our @args;
@@ -104,6 +105,8 @@ while( @ARGV )
     }
   push @args, $_;
   }
+
+die $help_text unless @args;
 
 print STDERR "will scan: @args. will not read symlinked files.\n";
 

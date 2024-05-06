@@ -24,3 +24,4 @@ notes:
     * options cannot be grouped: -Ps is invalid, correct is: -P -s 1G
     * files are compared by SIZE+SHA1, not full content compare
     * if Time::Progress is available, ETA and elapsed time stats are printed
+    * distributed under GPLv2 license
