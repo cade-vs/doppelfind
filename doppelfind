@@ -2,7 +2,7 @@
 ##############################################################################
 #
 #  DOPPELFIND duplicate files finder
-#  2021 (c) Vladi Belperchinov-Shabanski "Cade"
+#  2021-2024 (c) Vladi Belperchinov-Shabanski "Cade"
 #  http://cade.noxrun.com
 #  <cade@noxrun.com> <cade@cpan.org> <shabanski@gmail.com> 
 #
@@ -13,8 +13,103 @@ use strict;
 use Data::Tools;
 use POSIX;
 
+my $part_size_read = 4*1024;
+
+#-----------------------------------------------------------------------------
+
+my $opt_part_size_read = 4*1024;
+my $opt_lo_size_limit = undef;
+my $opt_hi_size_limit = undef;
+my $opt_part_hash_strategy;
+my $opt_follow;
+my $opt_verbose;
+my $opt_hexprint;
+
+our $help_text = <<END;
+DOPPELFIND 2021-2024 (c) Vladi Belperchinov-Shabanski "Cade" <cade\@noxrun.com>
+
+usage: $0 <options> dir1 dir2 dir3...
+
+options:
+    -s size   -- low  size limit. files below this size will be ignored
+    -S size   -- high size limit. files above this size will be ignored
+                 allowed suffixes are K, M, G.
+    -l        -- follow symlinked directories
+    -v        -- verbose information
+    -x        -- print duplicate files' names in hex byte stream 
+                 (for machine reading. note that filenames may be in utf-8)
+                 
+    -p size   -- set size for partial read for partial hash compare.
+                 default is 4K. allowed suffixes are K, M, G
+    -P        -- enable extended partial hash strategy. if not specified
+                 only first data from file is read (can be changed with -p)
+                 if -P specified also data from 2/3rds inside the file will
+                 be also read and hashed.
+    
+    --        -- end of options, the rest are directory names list
+    
+notes:
+    * options cannot be grouped: -Ps is invalid, correct is: -P -s 1G
+    * files are compared by SIZE+SHA1, not full content compare
+    * if Time::Progress is available, ETA and elapsed time stats are printed
+END
+
+our @args;
+while( @ARGV )
+  {
+  $_ = shift;
+  if( /^--+$/io )
+    {
+    push @args, @ARGV;
+    last;
+    }
+  if( /-p/ )
+    {
+    $opt_part_size_read = num_from_kmg_str( shift );
+    print STDERR "option: partial read size set to $opt_part_size_read\n";
+    next;
+    }
+  if( /-l/ )
+    {
+    $opt_follow = 1;
+    print STDERR "option: will follow symlinked directories\n";
+    next;
+    }
+  if( /-s/ )
+    {
+    $opt_lo_size_limit = num_from_kmg_str( shift );
+    print STDERR "option: low  limit file size set to $opt_lo_size_limit\n";
+    next;
+    }
+  if( /-S/ )
+    {
+    $opt_hi_size_limit = num_from_kmg_str( shift );
+    print STDERR "option: high limit file size set to $opt_hi_size_limit\n";
+    next;
+    }
+  if( /-v/ )
+    {
+    $opt_verbose = 1;
+    next;
+    }
+  if( /-x/ )
+    {
+    $opt_hexprint = 1;
+    next;
+    }
+  if( /^(--?h(elp)?|help)$/io )
+    {
+    print $help_text;
+    exit;
+    }
+  push @args, $_;
+  }
+
+print STDERR "will scan: @args. will not read symlinked files.\n";
+
+#-----------------------------------------------------------------------------
+
 # TODO:
-# set min size
 # check only sizes
 # check only partial hashes
 
@@ -28,7 +123,9 @@ my $z;
 
 #my @files = glob_tree( map { "$_/*" } @ARGV );
 print STDERR "scanning files...\n";
-my $files = fftwalk( { MODE => 'F' }, @ARGV );
+my $fft_type = FFT_FILES;
+$fft_type |= FFT_FOLLOW if $opt_follow;
+my $files = fftwalk( $fft_type, @args );
 my $az = @$files;
 print STDERR "found files: $az\n";
 
@@ -37,33 +134,53 @@ my $z;
 for my $e ( @$files )
   {
   my $sz = -s $e;
-  next unless $sz > 1_000_000_000; # FIXME: TODO: OPTION minsize
+  
+  next if $opt_lo_size_limit and $sz <= $opt_lo_size_limit;
+  next if $opt_hi_size_limit and $sz >= $opt_hi_size_limit;
+  
   my $rep = !( $z++ % 100 ) ? int( $z / 100 ) % 2 ? '*  ' : '  *' : undef;
-  print STDERR "  $rep           \r" if $rep;
+  print STDERR "  $rep  found items: $z         \r" if $rep;
   push @{ $SZ{ $sz } }, $e;
   }
 $az = $z;
 
+my $duplicate_count;
+my $duplicate_size;
 
-print STDERR "scanning partial hashes...\n";
+print STDERR "scanning $az items: partial hashes...\n";
 $az = filter_hash_groups( $az, \%SZ,  \%PH, sub { return sha1_hex( load_file_part( shift ) ) } );
 undef %SZ;
-print STDERR "scanning full hashes...\n";
+print STDERR "scanning $az items: full hashes...\n";
 $az = filter_hash_groups( $az, \%PH,  \%FH, sub { return sha1_hex_file( shift )              } );
 undef %PH;
-print STDERR "results...\n";
-$az = filter_hash_groups( $az, \%FH, undef, sub { print( shift() . "\n" ); return undef;     }, 1 );
+print STDERR "result: $az items\n";
+$az = filter_hash_groups( $az, \%FH, undef, sub { my $fn = shift; $fn = str_hex( $fn ) if $opt_hexprint; print( $fn . "\n" ); return undef; }, 'PRINT' );
 
+$duplicate_count = str_num_comma($duplicate_count);
+$duplicate_size  = str_num_comma($duplicate_size );
+
+print STDERR "duplicates groups: $duplicate_count\n";
+print STDERR "duplicates size:   $duplicate_size bytes\n";
 
 sub filter_hash_groups
 {
-  my $cc = shift;
-  my $fh = shift;
-  my $th = shift;
-  my $su = shift;
-  my $sp = shift;
+  my $cc = shift; # total count to filter
+  my $fh = shift; # from list
+  my $th = shift; # to   list
+  my $su = shift; # callback filter code
+  my $sp = shift; # separator print
 
-  my $az;
+  $duplicate_count = 0;
+  $duplicate_size  = 0;
+
+  my $pr;
+  eval
+    {
+    require Time::Progress;
+    $pr = Time::Progress->new( min => 0, max => $cc );
+    } unless $sp;
+
+  my $az = 0;
   my $z;
   while( my ( $p, $ea ) = each %$fh )
     {
@@ -72,18 +189,30 @@ sub filter_hash_groups
       $z++;
       next;
       }
+    $duplicate_count ++;
+    $duplicate_size  += ( @$ea - 1 ) * -s $ea->[0];
     for my $e ( @$ea )
       {
       $z++;
       $az++;
-      my $prc = sprintf "  %4.1f%%", 100*$z/$cc;
-      print STDERR "  $prc $z              \r";
       my $h = $su->( $e );
-      push @{ $th->{ $h } }, $e if $th;
+      next if $sp;
+      push @{ $th->{ $p . ":" . $h } }, $e if $th;
+      if( $pr )
+        {  
+        print STDERR $pr->report( "%p %30b  elapsed %Lmin, ETA: %Emin (%f)\r", $z );
+        }
+      else
+        {
+        my $prc = sprintf "  %4.1f%%", 100*$z/$cc;
+        print STDERR "  $prc $z of $cc              \r";
+        }  
       }
+    print "---$p" if $sp and $opt_verbose;
     print "---\n" if $sp;
     }
   
+  print STDERR "\n";
   return $az;  
 }
 
@@ -93,6 +222,42 @@ sub load_file_part
    my $data;
    my $f;
    sysopen $f, shift(), O_RDONLY;
-   sysread $f, $data, 73*1024;
-   return $data;
+   sysread $f, $data, $opt_part_size_read;
+
+return $data; # TODO: option
+
+   my $sz = sysseek( $f, 0, SEEK_END );
+   $sz = int( $sz * 2 / 3 );
+   
+   return $data if $sz <= $opt_part_size_read;
+   sysseek( $f, $sz, SEEK_SET );
+
+   my $data2;
+   sysread $f, $data2, $part_size_read;
+   
+   return $data . $data2;
+
+#+++
+
+   my $sz = sysseek( $f, -$opt_part_size_read, SEEK_END ); # 2 is SEEK_END, sorry, I know :)
+   
+   return $data if $sz <= 2 * $opt_part_size_read;
+   
+   my $data2;
+   sysread $f, $data2, $opt_part_size_read;
+   
+   return $data . $data2;
+}
+
+sub num_from_kmg_str
+{
+  # TODO: move to data::tools
+  my $s = uc shift;
+  return undef unless $s =~ /^\s*(\d+)(\s*([KMG]))?/;
+  $s = $1;
+  $s *= 1024**1 if $2 eq 'K';
+  $s *= 1024**2 if $2 eq 'M';
+  $s *= 1024**3 if $2 eq 'G';
+  
+  return $s;
 }
