@@ -2,6 +2,8 @@
 
 DOPPELFIND is file duplicates searching utility written in Perl
 
+![doppelfind](doppelfind.png)
+
 # SYNOPSIS
 
     doppelfind <options> dir1 dir2 dir3...
