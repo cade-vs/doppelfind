@@ -70,6 +70,12 @@ while( @ARGV )
     print STDERR "option: partial read size set to $opt_part_size_read\n";
     next;
     }
+  if( /-P/ )
+    {
+    $opt_part_hash_strategy = 1;
+    print STDERR "option: extended partial read hash strategy enabled :)\n";
+    next;
+    }
   if( /-l/ )
     {
     $opt_follow = 1;
@@ -227,7 +233,7 @@ sub load_file_part
    sysopen $f, shift(), O_RDONLY;
    sysread $f, $data, $opt_part_size_read;
 
-return $data; # TODO: option
+   return $data unless $opt_part_hash_strategy;
 
    my $sz = sysseek( $f, 0, SEEK_END );
    $sz = int( $sz * 2 / 3 );
@@ -237,17 +243,6 @@ return $data; # TODO: option
 
    my $data2;
    sysread $f, $data2, $part_size_read;
-   
-   return $data . $data2;
-
-#+++
-
-   my $sz = sysseek( $f, -$opt_part_size_read, SEEK_END ); # 2 is SEEK_END, sorry, I know :)
-   
-   return $data if $sz <= 2 * $opt_part_size_read;
-   
-   my $data2;
-   sysread $f, $data2, $opt_part_size_read;
    
    return $data . $data2;
 }
