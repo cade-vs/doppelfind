@@ -24,6 +24,8 @@ my $opt_part_hash_strategy;
 my $opt_follow;
 my $opt_verbose;
 my $opt_hexprint;
+my $opt_no_partial;
+my $opt_no_full;
 
 our $help_text = <<END;
 DOPPELFIND 2021-2024 (c) Vladi Belperchinov-Shabanski "Cade" <cade\@noxrun.com>
@@ -45,6 +47,9 @@ options:
                  only first data from file is read (can be changed with -p)
                  if -P specified also data from 2/3rds inside the file will
                  be also read and hashed.
+
+    -np       -- disable partial-hash compare
+    -nf       -- disable full-hash compare
     
     --        -- end of options, the rest are directory names list
     
@@ -66,7 +71,7 @@ while( @ARGV )
     }
   if( /-p/ )
     {
-    $opt_part_size_read = num_from_kmg_str( shift );
+    $opt_part_size_read = str_kmg_to_num( shift );
     print STDERR "option: partial read size set to $opt_part_size_read\n";
     next;
     }
@@ -74,6 +79,18 @@ while( @ARGV )
     {
     $opt_part_hash_strategy = 1;
     print STDERR "option: extended partial read hash strategy enabled :)\n";
+    next;
+    }
+  if( /-np/ )
+    {
+    $opt_no_partial = 1;
+    print STDERR "option: partial-hash compare disabled\n";
+    next;
+    }
+  if( /-nf/ )
+    {
+    $opt_no_full = 1;
+    print STDERR "option: full-hash compare disabled\n";
     next;
     }
   if( /-l/ )
@@ -84,13 +101,13 @@ while( @ARGV )
     }
   if( /-s/ )
     {
-    $opt_lo_size_limit = num_from_kmg_str( shift );
+    $opt_lo_size_limit = str_kmg_to_num( shift );
     print STDERR "option: low  limit file size set to $opt_lo_size_limit\n";
     next;
     }
   if( /-S/ )
     {
-    $opt_hi_size_limit = num_from_kmg_str( shift );
+    $opt_hi_size_limit = str_kmg_to_num( shift );
     print STDERR "option: high limit file size set to $opt_hi_size_limit\n";
     next;
     }
@@ -124,9 +141,8 @@ print STDERR "will scan: @args. will not read symlinked files.\n";
 
 $|++;
 
-my %SZ; # size only
-my %PH; # partial hash
-my %FH; # full hash
+my $FR = {}; # from data
+my $TO = {}; # to   data
 
 my $z;
 
@@ -149,21 +165,31 @@ for my $e ( @$files )
   
   my $rep = !( $z++ % 100 ) ? int( $z / 100 ) % 2 ? '*  ' : '  *' : undef;
   print STDERR "  $rep  found items: $z         \r" if $rep;
-  push @{ $SZ{ $sz } }, $e;
+  push @{ $FR->{ $sz } }, $e;
   }
 $az = $z;
 
 my $duplicate_count;
 my $duplicate_size;
 
-print STDERR "scanning $az items: partial hashes...\n";
-$az = filter_hash_groups( $az, \%SZ,  \%PH, sub { return sha1_hex( load_file_part( shift ) ) } );
-undef %SZ;
-print STDERR "scanning $az items: full hashes...\n";
-$az = filter_hash_groups( $az, \%PH,  \%FH, sub { return sha1_hex_file( shift )              } );
-undef %PH;
+unless( $opt_no_partial )
+  {
+  print STDERR "scanning $az items: partial hashes...\n";
+  $az = filter_hash_groups( $az, $FR,  $TO, sub { return sha1_hex( load_file_part( shift ) ) } );
+  $FR = {};
+  ( $FR, $TO ) = ( $TO, $FR );
+  }
+
+unless( $opt_no_full )
+  {
+  print STDERR "scanning $az items: full hashes...\n";
+  $az = filter_hash_groups( $az, $FR,  $TO, sub { return sha1_hex_file( shift )              } );
+  $FR = {};
+  ( $FR, $TO ) = ( $TO, $FR );
+  }
+
 print STDERR "result: $az items\n";
-$az = filter_hash_groups( $az, \%FH, undef, sub { my $fn = shift; $fn = str_hex( $fn ) if $opt_hexprint; print( $fn . "\n" ); return undef; }, 'PRINT' );
+$az = filter_hash_groups( $az, $FR,  undef, sub { my $fn = shift; $fn = str_hex( $fn ) if $opt_hexprint; print( $fn . "\n" ); return undef; }, 'PRINT' );
 
 $duplicate_count = str_num_comma($duplicate_count);
 $duplicate_size  = str_num_comma($duplicate_size );
@@ -245,17 +271,4 @@ sub load_file_part
    sysread $f, $data2, $part_size_read;
    
    return $data . $data2;
-}
-
-sub num_from_kmg_str
-{
-  # TODO: move to data::tools
-  my $s = uc shift;
-  return undef unless $s =~ /^\s*(\d+)(\s*([KMG]))?/;
-  $s = $1;
-  $s *= 1024**1 if $2 eq 'K';
-  $s *= 1024**2 if $2 eq 'M';
-  $s *= 1024**3 if $2 eq 'G';
-  
-  return $s;
 }
