@@ -24,6 +24,9 @@ DOPPELFIND is file duplicates searching utility written in Perl
                  only first data from file is read (can be changed with -p)
                  if -P specified also data from 2/3rds inside the file will
                  be also read and hashed.
+
+    -np       -- disable partial-hash compare
+    -nf       -- disable full-hash compare
     
     --        -- end of options, the rest are directory names list
     
@@ -33,6 +36,19 @@ DOPPELFIND is file duplicates searching utility written in Perl
     * files are compared by SIZE+SHA1, not full content compare
     * if Time::Progress is available, ETA and elapsed time stats are printed
     * distributed under GPLv2 license
+
+# REQUIREMENTS
+
+Doppelfind needs:
+
+    * perl
+    * Data::Tools module
+    * Time::Progress module (optional, to display work progress and ETA)
+    
+to install requirements on Devuan or Debian, do as root or with sudo:
+
+    apt install perl
+    cpan Data::Tools Time::Progress
 
 # AUTHOR
 
